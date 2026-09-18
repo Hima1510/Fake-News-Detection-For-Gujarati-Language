@@ -4,7 +4,7 @@ Extract Gujarati news (with fake/real labels) from:
   2. A "particular" (Gujarati-only) dataset
 
 Combine both into a single JSON-L file where each line is:
-    {"news": "<gujarati text>", "label": "fake" | "real"}
+    {"news_id": "<unique id>", "text": "<gujarati text>", "label": "fake" | "real"}
 
 NOTE: Column names below are guesses (text/news, label, language).
 Update COLUMN MAPPINGS section once you share the real file structure.
@@ -34,9 +34,11 @@ OUTPUT_PATH = "/mnt/user-data/outputs/gujarati_news_combined.jsonl"
 MIXED_TEXT_COL = "text"
 MIXED_LABEL_COL = "label"
 MIXED_LANG_COL = "language"   # set to None if there's no language column and you want script-detection instead
+MIXED_ID_COL = "id"           # set to None if there's no id column (an id will be auto-generated)
 
 GUJARATI_TEXT_COL = "text"
 GUJARATI_LABEL_COL = "label"
+GUJARATI_ID_COL = "id"         # set to None if there's no id column (an id will be auto-generated)
 
 # Label normalization: map whatever values appear in your data to "fake"/"real"
 LABEL_MAP = {
@@ -81,9 +83,9 @@ def load_dataset(path):
         raise ValueError(f"Unsupported file type: {path}")
 
 
-def extract_from_mixed(df):
+def extract_from_mixed(df, source_tag):
     records = []
-    for _, row in df.iterrows():
+    for idx, row in df.iterrows():
         text = row.get(MIXED_TEXT_COL)
 
         # Filter to Gujarati rows: prefer an explicit language column if present
@@ -99,38 +101,50 @@ def extract_from_mixed(df):
         if label is None or not isinstance(text, str) or not text.strip():
             continue
 
-        records.append({"news": text.strip(), "label": label})
+        if MIXED_ID_COL and MIXED_ID_COL in df.columns and pd.notna(row.get(MIXED_ID_COL)):
+            news_id = f"{source_tag}_{row.get(MIXED_ID_COL)}"
+        else:
+            news_id = f"{source_tag}_{idx}"
+
+        records.append({"news_id": str(news_id), "text": text.strip(), "label": label})
     return records
 
 
-def extract_from_gujarati_only(df):
+def extract_from_gujarati_only(df, source_tag="guj"):
     records = []
-    for _, row in df.iterrows():
+    for idx, row in df.iterrows():
         text = row.get(GUJARATI_TEXT_COL)
         label = normalize_label(row.get(GUJARATI_LABEL_COL))
         if label is None or not isinstance(text, str) or not text.strip():
             continue
-        records.append({"news": text.strip(), "label": label})
+
+        if GUJARATI_ID_COL and GUJARATI_ID_COL in df.columns and pd.notna(row.get(GUJARATI_ID_COL)):
+            news_id = f"{source_tag}_{row.get(GUJARATI_ID_COL)}"
+        else:
+            news_id = f"{source_tag}_{idx}"
+
+        records.append({"news_id": str(news_id), "text": text.strip(), "label": label})
     return records
 
 
 def main():
     # ---- Process ALL mixed-language files ----
     mixed_records = []
-    for path in MIXED_DATASET_PATHS:
+    for file_num, path in enumerate(MIXED_DATASET_PATHS, start=1):
         try:
             df = load_dataset(path)
         except Exception as e:
             print(f"[SKIPPED] Could not load {path}: {e}")
             continue
 
-        recs = extract_from_mixed(df)
+        source_tag = f"mixed{file_num}"
+        recs = extract_from_mixed(df, source_tag=source_tag)
         print(f"Extracted {len(recs)} Gujarati rows from {path}")
         mixed_records.extend(recs)
 
     # ---- Process the Gujarati-only file ----
     guj_df = load_dataset(GUJARATI_DATASET_PATH)
-    guj_records = extract_from_gujarati_only(guj_df)
+    guj_records = extract_from_gujarati_only(guj_df, source_tag="guj")
     print(f"Extracted {len(guj_records)} rows from Gujarati-only dataset")
 
     print(f"Total from all mixed dataset files: {len(mixed_records)}")
@@ -140,15 +154,20 @@ def main():
     seen = set()
     deduped = []
     for rec in combined:
-        if rec["news"] not in seen:
-            seen.add(rec["news"])
+        if rec["text"] not in seen:
+            seen.add(rec["text"])
             deduped.append(rec)
 
     print(f"Total combined: {len(combined)} | after de-dup: {len(deduped)}")
 
     with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
         for rec in deduped:
-            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+            out = {
+                "news_id": rec["news_id"],
+                "text": rec["text"],
+                "label": rec["label"],
+            }
+            f.write(json.dumps(out, ensure_ascii=False) + "\n")
 
     print(f"Saved to {OUTPUT_PATH}")
 
