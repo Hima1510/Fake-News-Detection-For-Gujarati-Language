@@ -1,6 +1,6 @@
 """
 Extract Gujarati news (with fake/real labels) from:
-  1. A "mixed language" dataset (multiple languages, needs Gujarati filtering)
+  1. One or more "mixed language" dataset files (multiple languages, needs Gujarati filtering)
   2. A "particular" (Gujarati-only) dataset
 
 Combine both into a single JSON-L file where each line is:
@@ -12,12 +12,21 @@ Update COLUMN MAPPINGS section once you share the real file structure.
 
 import json
 import re
+import glob
 import pandas as pd
 
 # ----------------------------
 # CONFIG — EDIT THESE PATHS
 # ----------------------------
-MIXED_DATASET_PATH = "/mnt/user-data/uploads/mixed_dataset.csv"       # multi-language dataset
+# Multiple mixed-language dataset files. You can:
+#   - list them explicitly: ["/mnt/user-data/uploads/mixed1.csv", "/mnt/user-data/uploads/mixed2.json"]
+#   - or use a glob pattern: glob.glob("/mnt/user-data/uploads/mixed_*.csv")
+MIXED_DATASET_PATHS = [
+    "/mnt/user-data/uploads/mixed_dataset1.csv",
+    "/mnt/user-data/uploads/mixed_dataset2.csv",
+    # add as many as you need...
+]
+
 GUJARATI_DATASET_PATH = "/mnt/user-data/uploads/gujarati_dataset.csv"  # gujarati-only dataset
 OUTPUT_PATH = "/mnt/user-data/outputs/gujarati_news_combined.jsonl"
 
@@ -106,15 +115,25 @@ def extract_from_gujarati_only(df):
 
 
 def main():
-    mixed_df = load_dataset(MIXED_DATASET_PATH)
+    # ---- Process ALL mixed-language files ----
+    mixed_records = []
+    for path in MIXED_DATASET_PATHS:
+        try:
+            df = load_dataset(path)
+        except Exception as e:
+            print(f"[SKIPPED] Could not load {path}: {e}")
+            continue
+
+        recs = extract_from_mixed(df)
+        print(f"Extracted {len(recs)} Gujarati rows from {path}")
+        mixed_records.extend(recs)
+
+    # ---- Process the Gujarati-only file ----
     guj_df = load_dataset(GUJARATI_DATASET_PATH)
-
-    mixed_records = extract_from_mixed(mixed_df)
     guj_records = extract_from_gujarati_only(guj_df)
-
-    print(f"Extracted {len(mixed_records)} Gujarati rows from mixed dataset")
     print(f"Extracted {len(guj_records)} rows from Gujarati-only dataset")
 
+    print(f"Total from all mixed dataset files: {len(mixed_records)}")
     combined = mixed_records + guj_records
 
     # Optional: drop exact duplicate news text
